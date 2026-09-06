@@ -18,24 +18,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 
 /**
- * Mini-TP 5 — « Relier deux écrans »
+ * Mini-TP 6 — « Compléter la couche manquante »
  *
- * Les DEUX ÉCRANS sont fournis et fonctionnels :
- *   - EcranListe  : la liste des produits (LazyColumn)
- *   - EcranDetail : le détail d'un produit
- * ... mais ils ne sont PAS reliés : au lancement, seule la liste s'affiche,
- * et cliquer sur un produit ne fait rien.
- *
- * Votre travail : compléter la navigation — trois TODO dans AppNavigation().
- * Rien d'autre n'est à modifier.
+ * La navigation (séance 5) est COMPLÈTE. Les écrans sont COMPLETS.
+ * Il manque la couche qui porte l'état : le ViewModel — deux TODO
+ * dans ProduitsViewModel.kt. Rien à modifier dans ce fichier,
+ * sauf le bloc « CASSER LE FLUX » de l'étape 3 (à décommenter).
  */
 
 data class Produit(
@@ -53,6 +51,11 @@ val produits = listOf(
     Produit(5, "Poivre noir", "Vatovavy", 45_000.0),
 )
 
+// ÉTAPE 3 — CASSER LE FLUX : cette variable vit HORS du circuit
+// état -> observation -> recomposition. Décommentez-la avec le bloc
+// « triche » de EcranDetail, et observez.
+// var poidsTriche = 0
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,59 +69,62 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// LA NAVIGATION — c'est ici que tout se joue (3 TODO)
-// ---------------------------------------------------------------------------
-
 @Composable
 fun AppNavigation() {
-    val navController: NavHostController = rememberNavController()
+    val navController = rememberNavController()
+    // UN SEUL ViewModel, partagé par les deux écrans : l'état vit ici,
+    // au-dessus de la navigation — il survit aux allers-retours ET à la rotation.
+    val viewModel: ProduitsViewModel = viewModel()
 
     NavHost(navController = navController, startDestination = "liste") {
 
         composable("liste") {
             EcranListe(
-                produits = produits,
+                viewModel = viewModel,
                 onProduitClick = { produitId ->
-                    // TODO 2 : naviguer vers le détail du produit cliqué.
                     navController.navigate("detail/$produitId")
                 }
             )
         }
 
-        // TODO 1 : déclarer la route du détail, avec son argument produitId.
-        // Modèle :
-           composable("detail/{produitId}") { backStackEntry ->
-               val id = backStackEntry.arguments
-                   ?.getString("produitId")?.toIntOrNull()
-               val produit = produits.find { it.id == id }
-               if (produit != null) {
-                   EcranDetail(
-                       produit = produit,
-                       onRetour = {
-                           // TODO 3 : revenir à la liste (dépiler).
-                           navController.popBackStack()
-                       }
-                   )
-               }
-           }
+        composable("detail/{produitId}") { backStackEntry ->
+            val id = backStackEntry.arguments
+                ?.getString("produitId")?.toIntOrNull()
+            val etat by viewModel.uiState.collectAsState()
+            val produit = etat.produits.find { it.id == id }
+            if (produit != null) {
+                EcranDetail(
+                    produit = produit,
+                    viewModel = viewModel,
+                    onRetour = { navController.popBackStack() }
+                )
+            }
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
-// LES DEUX ÉCRANS — fournis, rien à modifier
+// LES ÉCRANS — l'état DESCEND (uiState), les événements REMONTENT (fonctions)
 // ---------------------------------------------------------------------------
 
 @Composable
 fun EcranListe(
-    produits: List<Produit>,
+    viewModel: ProduitsViewModel,
     onProduitClick: (Int) -> Unit,
 ) {
+    // L'écran OBSERVE l'état : chaque émission du StateFlow le recompose.
+    val etat by viewModel.uiState.collectAsState()
+
     Column(Modifier.padding(16.dp)) {
         Text("Produits de la coopérative", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "Panier : ${etat.poidsPanierKg} kg",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Spacer(Modifier.height(12.dp))
         LazyColumn {
-            items(produits) { p ->
+            items(etat.produits) { p ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -141,8 +147,11 @@ fun EcranListe(
 @Composable
 fun EcranDetail(
     produit: Produit,
+    viewModel: ProduitsViewModel,
     onRetour: () -> Unit,
 ) {
+    val etat by viewModel.uiState.collectAsState()
+
     Column(Modifier.padding(24.dp)) {
         Text(produit.nom, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
@@ -151,6 +160,22 @@ fun EcranDetail(
             produit.prixKg?.let { "Prix : ${formatAriary(it)} / kg" } ?: "Prix non fixé",
             style = MaterialTheme.typography.bodyLarge,
         )
+        Spacer(Modifier.height(16.dp))
+
+        Text("Panier : ${etat.poidsPanierKg} kg")
+        Button(onClick = { viewModel.ajouterAuPanier(1) }) {
+            Text("Ajouter 1 kg au panier")
+        }
+
+        // ÉTAPE 3 — CASSER LE FLUX : décommentez ce bloc (et la variable
+        // poidsTriche en haut du fichier), puis cliquez sur ce bouton.
+        // Qu'affiche le texte ? Pourquoi ? (Voir l'énoncé.)
+        // Spacer(Modifier.height(16.dp))
+        // Text("Triche : $poidsTriche kg (hors circuit)")
+        // Button(onClick = { poidsTriche++ }) {
+        //     Text("Ajouter 1 kg (hors circuit)")
+        // }
+
         Spacer(Modifier.height(24.dp))
         Button(onClick = onRetour) { Text("Retour à la liste") }
     }
