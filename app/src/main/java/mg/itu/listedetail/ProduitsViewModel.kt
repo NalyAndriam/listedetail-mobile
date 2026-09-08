@@ -49,9 +49,17 @@ class ProduitsViewModel(application: Application) : AndroidViewModel(application
     val uiState: StateFlow<EtatUi> =
         combine(
             dao.tousLesProduits(),
+            dao.parPrixDecroissant(),
+            dao.stockSuperieurA(10.0),
+            dao.stockTotal(),
             mode,
-        ) { produits, modeCourant ->
-            EtatUi(produits = produits, mode = modeCourant)
+        ) {  parNom, parPrix, stockOk, total, modeCourant ->
+            val liste = when (modeCourant) {
+                          ModeAffichage.NOM -> parNom
+                          ModeAffichage.PRIX_DECROISSANT -> parPrix
+                          ModeAffichage.STOCK_SUFFISANT -> stockOk
+            }
+            EtatUi(produits = liste, mode = modeCourant, stockTotal = total)
 
             // ----------------------------------------------------------------
             // ÉTAPE 3 — brancher VOS requêtes (après les TODO du DAO)
