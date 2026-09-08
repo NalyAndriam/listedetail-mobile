@@ -1,53 +1,90 @@
 package mg.itu.listedetail
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
- * Mini-TP 6 — « Compléter la couche manquante »
+ * Mini-TP 7 — le ViewModel, désormais branché sur la base Room.
  *
- * Ce ViewModel est la couche manquante de l'application : il PORTE l'état.
- * Contrairement au remember de la séance 4, il SURVIT à la rotation —
- * c'est la réponse promise depuis la séance 3.
+ * Ce qui change par rapport à la séance 6 : l'état ne vient plus d'une liste
+ * en mémoire, mais de la BASE — via des Flow qui ré-émettent à chaque
+ * changement. La base est la source de vérité ; l'écran n'en est qu'un reflet.
  *
- * Deux TODO, à faire dans l'ordre. Rien d'autre n'est à modifier ici.
+ * Rien à modifier ici tant que les TODO du DAO ne sont pas écrits.
+ * Ensuite : suivez le bloc « ÉTAPE 3 » pour brancher vos requêtes.
  */
 
-/** L'état complet de l'interface, en une seule donnée immuable. */
+enum class ModeAffichage { NOM, PRIX_DECROISSANT, STOCK_SUFFISANT }
+
 data class EtatUi(
     val produits: List<Produit> = emptyList(),
-    val poidsPanierKg: Int = 0,
+    val mode: ModeAffichage = ModeAffichage.NOM,
+    val stockTotal: Double? = null,
 )
 
-class ProduitsViewModel : ViewModel() {
+class ProduitsViewModel(application: Application) : AndroidViewModel(application) {
 
-    // -----------------------------------------------------------------------
-    // TODO 1 — L'ÉTAT : remplacez la ligne provisoire ci-dessous par le duo :
-    //
-    //   private val _uiState = MutableStateFlow(EtatUi(produits = produits))
-    //   val uiState: StateFlow<EtatUi> = _uiState
-    //
-    // Pourquoi un duo ? Le _uiState privé est MUTABLE : seul le ViewModel
-    // a le droit d'écrire. Le uiState public est en LECTURE SEULE : l'UI
-    // ne fait qu'observer. C'est le flux unidirectionnel du cours.
-    // -----------------------------------------------------------------------
-       private val _uiState = MutableStateFlow(EtatUi(produits = produits))
-       val uiState: StateFlow<EtatUi> = _uiState
+    private val dao = AppDatabase.obtenir(application).produitDao()
+    private val mode = MutableStateFlow(ModeAffichage.NOM)
 
-    /** Appelée par l'écran de détail quand l'utilisateur ajoute au panier. */
-    fun ajouterAuPanier(poidsKg: Int) {
-        // -------------------------------------------------------------------
-        // TODO 2 — L'ÉVÉNEMENT (à faire APRÈS le TODO 1) :
-        // faites évoluer l'état de façon immuable, avec copy (séance 1) :
-        //
-           _uiState.update { etat ->
-               etat.copy(poidsPanierKg = etat.poidsPanierKg + poidsKg)
-           }
-        //
-        // L'état change -> le StateFlow émet -> l'écran qui l'observe
-        // se recompose. Personne n'a « mis à jour l'écran ».
-        // -------------------------------------------------------------------
+    init {
+        // Premier lancement : on remplit la base si elle est vide.
+        viewModelScope.launch {
+            if (dao.parId(1) == null) dao.insererTous(produitsInitiaux)
+        }
+    }
+
+    /**
+     * L'état de l'écran = les produits (selon le mode choisi) + le stock total.
+     * combine() fusionne plusieurs Flow en un seul : dès que l'un ré-émet,
+     * l'état est recalculé et l'écran se recompose.
+     */
+    val uiState: StateFlow<EtatUi> =
+        combine(
+            dao.tousLesProduits(),
+            mode,
+        ) { produits, modeCourant ->
+            EtatUi(produits = produits, mode = modeCourant)
+
+            // ----------------------------------------------------------------
+            // ÉTAPE 3 — brancher VOS requêtes (après les TODO du DAO)
+            //
+            // 1) Ajoutez vos Flow aux arguments de combine(), par exemple :
+            //
+            //      combine(
+            //          dao.tousLesProduits(),
+            //          dao.parPrixDecroissant(),       // votre TODO 1
+            //          dao.stockSuperieurA(10.0),      // votre TODO 2
+            //          dao.stockTotal(),               // votre TODO 3
+            //          mode,
+            //      ) { parNom, parPrix, stockOk, total, modeCourant ->
+            //
+            // 2) Choisissez la liste selon le mode :
+            //
+            //      val liste = when (modeCourant) {
+            //          ModeAffichage.NOM -> parNom
+            //          ModeAffichage.PRIX_DECROISSANT -> parPrix
+            //          ModeAffichage.STOCK_SUFFISANT -> stockOk
+            //      }
+            //      EtatUi(produits = liste, mode = modeCourant, stockTotal = total)
+            //
+            // Objectif minimal : AU MOINS un mode réellement branché,
+            // et le stock total affiché.
+            // ----------------------------------------------------------------
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = EtatUi(),
+        )
+
+    fun changerMode(nouveau: ModeAffichage) {
+        mode.value = nouveau
     }
 }
